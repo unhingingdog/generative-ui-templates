@@ -1,16 +1,142 @@
-//import { Telomere } from "telomere";
-//
+import { initTelomere } from "telomere";
+import { transformLayoutTemplateToWebTemplate } from "./template-model-transform";
+import { assertLayoutNode } from "./template-validators";
 
 import type { LayoutNode } from "./template-models";
+import type {
+  RenderNode,
+  RenderContainer,
+  RenderText,
+  RenderInput,
+  RenderButton,
+  RenderForm,
+} from "./web-render-models";
 
-const renderTemplateItem(template: LayoutNode): HTMLElement => {
-  // run renderInternal
-  // take Render model and build DOM element
+export type RenderEngine = {
+  next(delta: string): void;
+  template(): LayoutNode | null;
+  render(): RenderNode | null;
+  reset(): void;
+};
+
+export const getTemplateClassName = (templateId: string): string =>
+  `generative-ui-${templateId}`;
+
+function createEl(node: RenderNode): HTMLElement {
+  const el = document.createElement(node.element ?? "div");
+  el.classList.add(getTemplateClassName(String(node.id)));
+  return el;
 }
 
-export const renderEngine = (template: LayoutNode): HTMLElement => {
-  // telomere; run telomere
-  // if closable -> zod valdiate, recurse through and run renderTemplateItem on each 
-  // if not closable -> return null caller will just not replace existing UI
-  // if corrput -> throw error
-};
+function renderToDOM(node: RenderNode): HTMLElement {
+  const el = createEl(node);
+  const props: any = node.props ?? {};
+  switch (node.id) {
+    case "text":
+      el.textContent = props.content ?? (node as any).content ?? "";
+      break;
+    case "input":
+      if (props.queryId) el.setAttribute("name", props.queryId);
+      if (props.query) el.setAttribute("placeholder", props.query);
+      break;
+    case "button":
+      el.textContent = props.query ?? "Submit";
+      break;
+  }
+  const children = (node as any).children as RenderNode[] | undefined;
+  if (children) for (const c of children) el.appendChild(renderToDOM(c));
+  return el;
+}
+
+// FNV-1a 32-bit (non-crypto) hash for the streaming tail
+function fnv1a32(s: string, seed = 0x811c9dc5): number {
+  let h = seed >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = (h + (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24)) >>> 0;
+  }
+  return h >>> 0;
+}
+
+export async function createRenderEngine(
+  root: HTMLElement,
+): Promise<RenderEngine> {
+  let raw = "";
+  let lastCap = "";
+  let lastTailHash = 0;
+  let version = 0;
+
+  let tmpl: LayoutNode | null = null;
+  let renderModel: RenderNode | null = null;
+
+  const { processDelta, reset: resetTelomere } = await initTelomere();
+
+  const next = (delta: string): void => {
+    raw += delta;
+
+    const r: any = processDelta(delta);
+    const capped: string =
+      r && r.type !== "NotClosable" && typeof r.cap === "string"
+        ? r.cap
+        : lastCap;
+
+    // Determine tail beyond the stable cap
+    let tail = "";
+    if (capped && raw.startsWith(capped)) {
+      tail = raw.slice(capped.length);
+    } else if (!capped) {
+      tail = raw;
+    } else {
+      tail = raw.slice(Math.min(capped.length, raw.length));
+    }
+
+    const capChanged = capped !== lastCap;
+    const tailHash = fnv1a32(tail);
+    const tailChanged = tailHash !== lastTailHash;
+
+    if (!capChanged && !tailChanged) return;
+
+    version++;
+
+    if (capChanged) {
+      try {
+        const candidate = JSON.parse(capped) as unknown;
+        assertLayoutNode(candidate);
+        tmpl = candidate as LayoutNode;
+        renderModel = transformLayoutTemplateToWebTemplate(tmpl);
+        lastCap = capped;
+      } catch {
+        // keep old renderModel; try again on next tick
+      }
+    }
+
+    if (!renderModel) return;
+
+    const el = renderToDOM(renderModel);
+    const optimistic = tail.length > 0;
+    if (optimistic) el.dataset.optimistic = "true";
+    el.dataset.version = String(version);
+
+    // Append the new snapshot to the provided root
+    root.appendChild(el);
+
+    lastTailHash = tailHash;
+  };
+
+  const reset = () => {
+    raw = "";
+    lastCap = "";
+    lastTailHash = 0;
+    version = 0;
+    tmpl = null;
+    renderModel = null;
+
+    if (root.firstChild) {
+      root.removeChild(root?.firstChild);
+    }
+
+    resetTelomere();
+  };
+
+  return { next, template: () => tmpl, render: () => renderModel, reset };
+}

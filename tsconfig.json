@@ -21,5 +21,6 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
+  "types": ["vite/client", "vitest", "vitest/globals", "vitest/importMeta"],
   "include": ["src"]
 }

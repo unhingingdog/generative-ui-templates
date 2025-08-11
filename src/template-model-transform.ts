@@ -6,13 +6,15 @@ import {
   type RenderNode,
 } from "./web-render-models";
 
-export const renderInternal = (node: LayoutNode): RenderNode => {
+export const transformLayoutTemplateToWebTemplate = (
+  node: LayoutNode,
+): RenderNode => {
   switch (node.id) {
     case "container":
       return {
         id: "container",
         element: webTagMap.container,
-        children: node.children.map(renderInternal),
+        children: node.children.map(transformLayoutTemplateToWebTemplate),
       };
     case "text":
       return {
@@ -36,9 +38,9 @@ export const renderInternal = (node: LayoutNode): RenderNode => {
       return {
         id: "form",
         element: webTagMap.form,
-        children: node.children.map(renderInternal) as Array<
-          RenderInput | RenderButton
-        >,
+        children: node.children.map(
+          transformLayoutTemplateToWebTemplate,
+        ) as Array<RenderInput | RenderButton>,
       };
   }
 };
