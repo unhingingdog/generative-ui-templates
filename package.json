@@ -17,6 +17,7 @@
     "vitest": "^3.2.4"
   },
   "dependencies": {
+    "@openai/agents": "^0.0.15",
     "telomere": "^0.1.4",
     "zod": "^4.0.17"
   }

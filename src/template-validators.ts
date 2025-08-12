@@ -4,7 +4,7 @@ import type { LayoutNode } from "./template-models";
 // TODO: important - we want to allow partial JSON, becuase of the imcomplete JSON closing code (telomere), so the text and children fields
 // always need to come last, becuase these are the only fields that can be closed off and then subsequently parsed by renderInternal.
 //
-const LayoutNodeSchema: z.ZodType<LayoutNode> = z.lazy(() =>
+export const LayoutNodeSchema: z.ZodType<LayoutNode> = z.lazy(() =>
   z.discriminatedUnion("id", [
     z.object({
       id: z.literal("container"),

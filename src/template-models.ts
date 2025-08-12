@@ -20,6 +20,8 @@ export interface QueryableParent<
   children: T[];
 }
 
+// TODO: Create distinct layouts for a form submit button and a query button
+
 /* concrete layout nodes ------------------------------------------- */
 export type LayoutContainer = LayoutBase<"container"> & Parent;
 export type LayoutText = LayoutBase<"text"> & TextContent;

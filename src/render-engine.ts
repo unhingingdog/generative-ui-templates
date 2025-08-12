@@ -115,6 +115,11 @@ function bindFormSubmit(formEl: HTMLFormElement, onSubmit?: FormSubmit) {
   });
 }
 
+// TODO: must make sure number of keys on potentially partial Template model is correct.
+// While the json doe not need to be complete, all the fields must be there.
+// probably no way to know this off the type interface at runtime. May need to add a mapping
+// somewhere. Could proably use a zod schema util for this.
+
 export async function createRenderEngine(
   root: HTMLElement,
   onSubmit?: FormSubmit,

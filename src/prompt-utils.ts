@@ -12,58 +12,72 @@ export interface TemplateInstruction<T extends LayoutNode = LayoutNode> {
   props: Record<keyof T, string>;
 }
 
-/* explicit map gives strong IntelliSense for authoring ------------ */
 export const nodeInstructions = {
   container: {
-    usage: "A logical grouping element that wraps other nodes.",
+    usage:
+      "Group other nodes. Use sparingly; prefer a single root container with nested content.",
     props: {
-      id: 'Must be the literal string "container".',
-      children: "Array of nested UI nodes.",
+      id: "Literal 'container'.",
+      children:
+        "Array of child nodes (container | text | input | button | form). Keep the tree shallow and meaningful.",
     },
-  } satisfies TemplateInstruction<LayoutContainer>,
+  } as const satisfies TemplateInstruction<LayoutContainer>,
 
   text: {
-    usage: "Displays a single piece of plain text.",
+    usage:
+      "Static text content. Use for headings, paragraphs, labels. No Markdown; plain strings only.",
     props: {
-      id: 'Literal "text".',
-      content: "The text the user will see.",
+      id: "Literal 'text'.",
+      content:
+        "Required string. Short, user-facing copy. Do not include code fences or JSON.",
     },
-  } satisfies TemplateInstruction<LayoutText>,
+  } as const satisfies TemplateInstruction<LayoutText>,
 
   input: {
-    usage: "A free‑text question awaiting user input.",
+    usage:
+      "Single-line text input bound to a query. Pair with a button or within a form.",
     props: {
-      id: 'Literal "input".',
-      queryId: "Stable identifier used when posting back the answer.",
-      query: "Prompt shown to the user.",
+      id: "Literal 'input'.",
+      queryId:
+        "Stable identifier for binding. Snake/kebab or camelCase is fine; do not change across updates.",
+      query:
+        "User-facing label/prompt for the input. Keep concise (<= 80 chars).",
     },
-  } satisfies TemplateInstruction<LayoutInput>,
+  } as const satisfies TemplateInstruction<LayoutInput>,
 
   button: {
-    usage: "A clickable option for the user to choose.",
+    usage:
+      "Action button that submits the bound queryId. Keep labels short and descriptive.",
     props: {
-      id: 'Literal "button".',
-      queryId: "Stable identifier used when this option is chosen.",
-      query: "Label shown on the button.",
+      id: "Literal 'button'.",
+      queryId:
+        "Must match an existing input's queryId if used together; otherwise defines an action key.",
+      query:
+        "User-facing label for the action (e.g., 'Search', 'Send'). No emojis.",
     },
-  } satisfies TemplateInstruction<LayoutButton>,
+  } as const satisfies TemplateInstruction<LayoutButton>,
 
   form: {
-    usage: "Packages multiple inputs/buttons so they submit together.",
+    usage:
+      "Scoped set of inputs and buttons that submit together. Children may ONLY be 'input' or 'button'.",
     props: {
-      id: 'Literal "form".',
-      children: "Array of `input` or `button` nodes.",
+      id: "Literal 'form'.",
+      children:
+        "Array of 'input' and 'button' nodes only. No nesting of other forms or containers.",
     },
-  } satisfies TemplateInstruction<LayoutForm>,
+  } as const satisfies TemplateInstruction<LayoutForm>,
 } as const;
 
-/* Convenience alias with correct type */
 export type NodeInstructionMap = typeof nodeInstructions;
 
-/* System‑prompt builder ------------------------------------------- */
-export const generateSystemPrompt = (map: NodeInstructionMap): string => {
+export const generateSystemPrompt = (
+  domainInstructions: string,
+  map: NodeInstructionMap = nodeInstructions,
+): string => {
   const lines: string[] = [
-    "You emit JSON that follows this Generative‑UI DSL.",
+    domainInstructions,
+    "",
+    "You emit JSON that follows this Generative-UI DSL.",
     "",
     "### Node types & how to use them",
   ];
@@ -79,18 +93,49 @@ export const generateSystemPrompt = (map: NodeInstructionMap): string => {
 
   lines.push(
     "",
-    "### Example",
+    "### Rules",
+    "- Output ONLY a single JSON object that matches the schema exactly.",
+    "- No prose, no Markdown, no backticks, no code fences.",
+    "- Keep copy concise and human-friendly.",
+  );
+
+  lines.push(
+    "",
+    "You are to conduct a dialogue with the user.",
+    `Given you cannot reply with plain text, you may construt one, 
+    with a UI template that includes a form with one or more inputs (Button can also be an input).`,
+    "",
+    "The user will respond by submitting a JSON payload, with their answer as a value and your the query input/button id as the key.",
+  );
+
+  lines.push(
+    "",
+    "### Minimal example",
     "```json",
     JSON.stringify(
       {
         id: "container",
         children: [
-          { id: "text", content: "Hello, world!" },
+          { id: "text", content: "Build your salad" },
           {
             id: "form",
             children: [
-              { id: "input", queryId: "name", query: "What is your name?" },
-              { id: "button", queryId: "skip", query: "Skip" },
+              {
+                id: "input",
+                queryId: "protein",
+                query: "What protein do you want?",
+              },
+              {
+                id: "input",
+                queryId: "garnish",
+                query: "What garnish do you want?",
+              },
+              {
+                id: "input",
+                queryId: "delivery-date",
+                query: "When do you want it delivered?",
+              },
+              { id: "button", query: "Submit" },
             ],
           },
         ],
@@ -99,9 +144,28 @@ export const generateSystemPrompt = (map: NodeInstructionMap): string => {
       2,
     ),
     "```",
+  );
+
+  lines.push(
     "",
-    "Return a single root object conforming exactly to this schema.",
+    "The user would respond with something like:",
+    "```json",
+    JSON.stringify(
+      {
+        protein: "fish",
+        garnish: "italian parsley",
+        "delivery-date": "in two hours",
+      },
+      null,
+      2,
+    ),
+    "```",
   );
 
   return lines.join("\n");
 };
+
+export const defaultSystemPrompt = generateSystemPrompt(
+  "The topic is anything.",
+  nodeInstructions,
+);
