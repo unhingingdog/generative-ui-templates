@@ -1,13 +1,3 @@
-import { renderInternal } from "./template-model-transform";
-import type {
-  RenderButton,
-  RenderContainer,
-  RenderForm,
-  RenderInput,
-  RenderNode,
-  RenderText,
-} from "./web-render-models";
-
 export type NodeId = "container" | "text" | "input" | "button" | "form";
 
 /* reusable traits -------------------------------------------------- */

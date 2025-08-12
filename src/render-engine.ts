@@ -19,6 +19,8 @@ import type {
   RenderText,
 } from "./web-render-models";
 
+export type FormSubmit = <T>(payload: Record<string, T>) => void;
+
 export type RenderEngine = {
   next(delta: string): void;
   template(): LayoutNode | null;
@@ -31,6 +33,7 @@ export function toRender(node: LayoutText): RenderText;
 export function toRender(node: LayoutInput): RenderInput;
 export function toRender(node: LayoutButton): RenderButton;
 export function toRender(node: LayoutForm): RenderForm;
+export function toRender(node: LayoutNode): RenderNode;
 export function toRender(node: LayoutNode): RenderNode {
   return transformLayoutTemplateToWebTemplate(node);
 }
@@ -39,14 +42,42 @@ export const getTemplateClassName = (templateId: string): string =>
   `generative-ui-${templateId}`;
 
 function createEl(node: RenderNode): HTMLElement {
-  const el = document.createElement(node.element ?? "div");
-  el.classList.add(getTemplateClassName(String(node.id)));
+  const el = document.createElement((node as any).element ?? "div");
+  const id = (node as any).id as string;
+  el.classList.add(getTemplateClassName(id));
   return el;
 }
 
-function renderToDOM(node: RenderNode): HTMLElement {
+function renderToDOM(node: RenderNode, onSubmit?: FormSubmit): HTMLElement {
   const el = createEl(node);
+  applyProps(el, node);
+  const tag = (node as any).element ?? (node as any).id;
+  if (tag === "form") bindFormSubmit(el as HTMLFormElement, onSubmit);
+  const children = (node as any).children as RenderNode[] | undefined;
+  if (children)
+    for (const c of children) el.appendChild(renderToDOM(c, onSubmit));
+  return el;
+}
+
+function renderInto(
+  target: HTMLElement,
+  node: RenderNode,
+  onSubmit?: FormSubmit,
+) {
+  const id = (node as any).id as string;
+  target.classList.add(getTemplateClassName(id));
+  while (target.firstChild) target.removeChild(target.firstChild);
+  applyProps(target, node);
+  const tag = (node as any).element ?? id;
+  if (tag === "form") bindFormSubmit(target as HTMLFormElement, onSubmit);
+  const children = (node as any).children as RenderNode[] | undefined;
+  if (children)
+    for (const c of children) target.appendChild(renderToDOM(c, onSubmit));
+}
+
+function applyProps(el: HTMLElement, node: RenderNode) {
   const props: any = node.props ?? {};
+  el.textContent = "";
   switch (node.id) {
     case "text":
       el.textContent = props.content ?? (node as any).content ?? "";
@@ -55,120 +86,108 @@ function renderToDOM(node: RenderNode): HTMLElement {
       if (props.queryId) el.setAttribute("name", props.queryId);
       if (props.query) el.setAttribute("placeholder", props.query);
       break;
-    case "button":
-      el.textContent = props.query ?? "Submit";
+    case "button": {
+      if (props.queryId) el.setAttribute("name", props.queryId);
+      const label =
+        props.content ?? props.query ?? (node as any).content ?? "Submit";
+      (el as HTMLButtonElement).textContent = String(label);
+      (el as HTMLButtonElement).value = String(props.value ?? label);
       break;
+    }
   }
-  const children = (node as any).children as RenderNode[] | undefined;
-  if (children) for (const c of children) el.appendChild(renderToDOM(c));
-  return el;
 }
 
-// FNV-1a 32-bit (non-crypto) hash for the streaming tail
-function fnv1a32(s: string, seed = 0x811c9dc5): number {
-  let h = seed >>> 0;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = (h + (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24)) >>> 0;
-  }
-  return h >>> 0;
+function bindFormSubmit(formEl: HTMLFormElement, onSubmit?: FormSubmit) {
+  if ((formEl as any).__guiSubmitBound) return;
+  (formEl as any).__guiSubmitBound = true;
+
+  formEl.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const submitter = (e as SubmitEvent).submitter as HTMLButtonElement | null;
+    const fd = new FormData(formEl);
+    if (submitter?.name)
+      fd.set(submitter.name, submitter.value || submitter.textContent || "");
+    const payload = Object.fromEntries(fd) as Record<
+      string,
+      FormDataEntryValue
+    >;
+    onSubmit?.(payload);
+  });
 }
 
 export async function createRenderEngine(
   root: HTMLElement,
+  onSubmit?: FormSubmit,
 ): Promise<RenderEngine> {
   let raw = "";
-  let lastCap = "";
-  let lastTailHash = 0;
-  let version = 0;
-
   let tmpl: LayoutNode | null = null;
   let renderModel: RenderNode | null = null;
 
   const { processDelta, reset: resetTelomere } = await initTelomere();
 
-  console.log("success init render engine", root);
+  console.log("[engine] init", { root });
 
   const next = (delta: string): void => {
     raw += delta;
-
-    console.log("recv delta ", delta);
-    console.log("raw is ", raw);
+    console.log("[engine] recv delta:", JSON.stringify(delta));
+    console.log("[engine] raw now   :", JSON.stringify(raw));
 
     const r: any = processDelta(delta);
-    const capped: string =
-      r && r.type !== "NotClosable" && typeof r.cap === "string"
-        ? r.cap
-        : lastCap;
+    console.log("[engine] telomere  :", r);
 
-    console.log("teomere is ", r);
+    const hasCap = r && r.type !== "NotClosable" && typeof r.cap === "string";
+    console.log(
+      "[engine] hasCap    :",
+      hasCap,
+      hasCap ? JSON.stringify(r.cap) : null,
+    );
+    if (!hasCap) {
+      console.log("[engine] no cap → skip render this tick");
+      return;
+    }
 
-    console.log("capped is", capped);
+    const stableDoc = raw + r.cap;
+    console.log("[engine] stableDoc :", JSON.stringify(stableDoc));
 
-    // Determine tail beyond the stable cap
-    let tail = "";
-    if (capped && raw.startsWith(capped)) {
-      tail = raw.slice(capped.length);
-    } else if (!capped) {
-      tail = raw;
+    try {
+      const candidate = JSON.parse(stableDoc) as unknown;
+      console.log("[engine] parsed    :", candidate);
+      assertLayoutNode(candidate);
+      console.log("[engine] validated");
+      tmpl = candidate as LayoutNode;
+      renderModel = toRender(tmpl);
+      console.log("[engine] toRender  :", renderModel);
+    } catch (err) {
+      console.error("[engine] parse/validate failed:", err);
+      return;
+    }
+
+    if (!renderModel) {
+      console.log("[engine] no renderModel; bail");
+      return;
+    }
+
+    if (root.firstChild) {
+      console.log("[engine] mutate existing snapshot");
+      renderInto(root.firstElementChild as HTMLElement, renderModel, onSubmit);
     } else {
-      tail = raw.slice(Math.min(capped.length, raw.length));
+      console.log("[engine] append first snapshot");
+      root.appendChild(renderToDOM(renderModel, onSubmit));
     }
 
-    const capChanged = capped !== lastCap;
-    const tailHash = fnv1a32(tail);
-    const tailChanged = tailHash !== lastTailHash;
-
-    if (!capChanged && !tailChanged) return;
-
-    console.log("change detected");
-
-    version++;
-
-    if (capChanged) {
-      try {
-        const candidate = JSON.parse(capped) as unknown;
-        console.log("raw template is", candidate);
-        assertLayoutNode(candidate);
-        console.log("passed validation");
-        tmpl = candidate as LayoutNode;
-        renderModel = toRender(tmpl);
-        console.log("successfully transformed to render template", renderModel);
-        lastCap = capped;
-      } catch {
-        // keep old renderModel; try again on next tick
-        console.log("failed");
-      }
-    }
-
-    if (!renderModel) return;
-
-    const el = renderToDOM(renderModel);
-
-    console.log("generated element", el);
-
-    const optimistic = tail.length > 0;
-    if (optimistic) el.dataset.optimistic = "true";
-    el.dataset.version = String(version);
-
-    // Append the new snapshot to the provided root
-    root.appendChild(el);
-
-    lastTailHash = tailHash;
+    console.log(
+      "[engine] post-DOM",
+      { childCount: root.childElementCount },
+      root.firstElementChild?.outerHTML,
+    );
   };
 
   const reset = () => {
+    console.log("[engine] reset");
     raw = "";
-    lastCap = "";
-    lastTailHash = 0;
-    version = 0;
     tmpl = null;
     renderModel = null;
-
-    if (root.firstChild) {
-      root.removeChild(root?.firstChild);
-    }
-
+    if (root.firstChild) root.removeChild(root.firstChild);
     resetTelomere();
   };
 
