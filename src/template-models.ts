@@ -43,13 +43,3 @@ export type LayoutNode =
   | LayoutInput
   | LayoutButton
   | LayoutForm;
-
-/* Public overloads (nice narrow return types) */
-export function toRender(node: LayoutContainer): RenderContainer;
-export function toRender(node: LayoutText): RenderText;
-export function toRender(node: LayoutInput): RenderInput;
-export function toRender(node: LayoutButton): RenderButton;
-export function toRender(node: LayoutForm): RenderForm;
-export function toRender(node: LayoutNode): RenderNode {
-  return renderInternal(node);
-}

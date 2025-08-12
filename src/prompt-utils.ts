@@ -5,7 +5,7 @@ import type {
   LayoutInput,
   LayoutNode,
   LayoutText,
-} from "./models";
+} from "./template-models";
 
 export interface TemplateInstruction<T extends LayoutNode = LayoutNode> {
   usage: string;

@@ -2,14 +2,21 @@ import { initTelomere } from "telomere";
 import { transformLayoutTemplateToWebTemplate } from "./template-model-transform";
 import { assertLayoutNode } from "./template-validators";
 
-import type { LayoutNode } from "./template-models";
 import type {
-  RenderNode,
-  RenderContainer,
-  RenderText,
-  RenderInput,
+  LayoutButton,
+  LayoutContainer,
+  LayoutForm,
+  LayoutInput,
+  LayoutNode,
+  LayoutText,
+} from "./template-models";
+import type {
   RenderButton,
+  RenderContainer,
   RenderForm,
+  RenderInput,
+  RenderNode,
+  RenderText,
 } from "./web-render-models";
 
 export type RenderEngine = {
@@ -18,6 +25,15 @@ export type RenderEngine = {
   render(): RenderNode | null;
   reset(): void;
 };
+
+export function toRender(node: LayoutContainer): RenderContainer;
+export function toRender(node: LayoutText): RenderText;
+export function toRender(node: LayoutInput): RenderInput;
+export function toRender(node: LayoutButton): RenderButton;
+export function toRender(node: LayoutForm): RenderForm;
+export function toRender(node: LayoutNode): RenderNode {
+  return transformLayoutTemplateToWebTemplate(node);
+}
 
 export const getTemplateClassName = (templateId: string): string =>
   `generative-ui-${templateId}`;
@@ -71,14 +87,23 @@ export async function createRenderEngine(
 
   const { processDelta, reset: resetTelomere } = await initTelomere();
 
+  console.log("success init render engine", root);
+
   const next = (delta: string): void => {
     raw += delta;
+
+    console.log("recv delta ", delta);
+    console.log("raw is ", raw);
 
     const r: any = processDelta(delta);
     const capped: string =
       r && r.type !== "NotClosable" && typeof r.cap === "string"
         ? r.cap
         : lastCap;
+
+    console.log("teomere is ", r);
+
+    console.log("capped is", capped);
 
     // Determine tail beyond the stable cap
     let tail = "";
@@ -96,23 +121,32 @@ export async function createRenderEngine(
 
     if (!capChanged && !tailChanged) return;
 
+    console.log("change detected");
+
     version++;
 
     if (capChanged) {
       try {
         const candidate = JSON.parse(capped) as unknown;
+        console.log("raw template is", candidate);
         assertLayoutNode(candidate);
+        console.log("passed validation");
         tmpl = candidate as LayoutNode;
-        renderModel = transformLayoutTemplateToWebTemplate(tmpl);
+        renderModel = toRender(tmpl);
+        console.log("successfully transformed to render template", renderModel);
         lastCap = capped;
       } catch {
         // keep old renderModel; try again on next tick
+        console.log("failed");
       }
     }
 
     if (!renderModel) return;
 
     const el = renderToDOM(renderModel);
+
+    console.log("generated element", el);
+
     const optimistic = tail.length > 0;
     if (optimistic) el.dataset.optimistic = "true";
     el.dataset.version = String(version);
